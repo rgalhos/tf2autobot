@@ -253,6 +253,7 @@ export const DEFAULTS: JsonOptions = {
             onAmount: false,
             onCurrentStock: false,
             onMaxStock: false,
+            buySellCodeCommand: false,
             style: 1
         },
         highValue: {
@@ -630,6 +631,7 @@ export const DEFAULTS: JsonOptions = {
                 offer: ''
             },
             hasBeenMadeAcceptingMobileConfirmation: {
+                enabled: false,
                 donation: '',
                 isBuyingPremium: '',
                 offer: ''
@@ -1320,6 +1322,7 @@ interface ShowBoldText {
     onAmount: boolean;
     onCurrentStock: boolean;
     onMaxStock: boolean;
+    buySellCodeCommand: boolean;
     style: number;
 }
 
@@ -1686,6 +1689,7 @@ interface AddToQueue {
 }
 
 interface CartQueueProcessing {
+    enabled?: boolean;
     donation?: string;
     isBuyingPremium?: string;
     offer?: string;

@@ -177,8 +177,7 @@ function getSummary(
 
         const isTF2Items = testSKU(sku);
 
-        // compatible with pollData from before v3.0.0 / before v2.2.0 and/or v3.0.0 or later ↓
-        const amount = typeof dict[sku] === 'object' ? (dict[sku]['amount'] as number) : dict[sku];
+        const amount = dict[sku].amount;
         const generateName = isTF2Items
             ? bot.schema.getName(SKU.fromString(sku.replace(/;p\d+/, '')), properName)
             : sku; // Non-TF2 items
@@ -213,7 +212,7 @@ function getSummary(
                                 ? pureEmoji.get(sku)
                                 : name
                             : name
-                    }](https://autobot.tf/items/${sku})${amount > 1 ? ` x${amount}` : ''} (${
+                    }](${fromSKUToBackpackLink(bot, sku)})${amount > 1 ? ` x${amount}` : ''} (${
                         (summaryAccepted || summaryInProcess) && oldStock !== null ? `${oldStock} → ` : ''
                     }${
                         which === 'our'
@@ -251,7 +250,7 @@ function getSummary(
                                 ? pureEmoji.get(sku)
                                 : name
                             : name
-                    }](https://autobot.tf/items/${sku})${amount > 1 ? ` x${amount}` : ''}`
+                    }](${fromSKUToBackpackLink(bot, sku)})${amount > 1 ? ` x${amount}` : ''}`
                 );
             } else {
                 summary.push(name + (amount > 1 ? ` x${amount}` : ''));
@@ -278,5 +277,62 @@ function getSummary(
         return summary.join(', ') + (left > 0 ? ` and ${left} more items.` : '');
     } else {
         return summary.join(', ');
+    }
+}
+
+function fromSKUToBackpackLink(bot: Bot, sku: string) {
+    try {
+        const item = bot.schema.getItemBySKU(sku);
+
+        if (!item) {
+            return 'https://www.prices.tf/items/' + sku;
+        }
+
+        const killstreakStrings = ['', 'Killstreak ', 'Specialized Killstreak ', 'Professional Killstreak '];
+        const qualitiesID = [
+            'Normal',
+            'Genuine',
+            'rarity2',
+            'Vintage',
+            'rarity3',
+            'Unusual',
+            'Unique',
+            'Community',
+            'Valve',
+            'Self-Made',
+            'Customized',
+            'Strange',
+            'Completed',
+            'Haunted',
+            "Collector's",
+            'Decorated Weapon'
+        ];
+
+        const data = SKU.fromString(sku);
+        const elevatedStrange = sku.includes(';strange');
+        let name = item.proper_name && !item.name.startsWith('The ') ? item.name : item.item_name;
+
+        if (data.australium) name = 'Australium ' + name;
+
+        name = killstreakStrings[data.killstreak || 0] + name;
+
+        return encodeURI(
+            'https://backpack.tf/stats/' +
+                // Quality
+                (elevatedStrange ? 'Strange ' : '') +
+                qualitiesID[data.quality] +
+                // Item name
+                `/${name}` +
+                // Always tradable
+                '/Tradable' +
+                // (Non)?-Craftable
+                `/${data.craftable ? 'Craftable' : 'Non-Craftable'}` +
+                // Priceindex, crate series, particle...
+                `/${/Kit$/.test(name) ? String(data.killstreak) + '-' : ''}${
+                    Number(data.effect || data.crateseries || data.target || data.output) || ''
+                }`
+        );
+    } catch (e: any) {
+        return 'https://www.prices.tf/items/' + sku;
     }
 }

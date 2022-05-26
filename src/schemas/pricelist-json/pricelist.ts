@@ -7,6 +7,9 @@ export const pricelistSchema: jsonschema.Schema = {
         sku: {
             type: 'string'
         },
+        code: {
+            type: 'integer'
+        },
         enabled: {
             type: 'boolean'
         },

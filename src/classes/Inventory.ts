@@ -21,6 +21,8 @@ export default class Inventory {
 
     private nonTradable: Dict = {};
 
+    private lastCachedInventoryFetch: EconItem[];
+
     get getTotalItems(): number {
         let items = 0;
         for (const sku in this.tradable) {
@@ -139,6 +141,7 @@ export default class Inventory {
                 }
 
                 this.setItems = items;
+                this.lastCachedInventoryFetch = items;
                 resolve();
             });
         });
@@ -161,6 +164,18 @@ export default class Inventory {
             this.strangeParts,
             this.which
         );
+    }
+
+    getCachedInventory(tradableOnly = true): EconItem[] {
+        if (tradableOnly) {
+            return this.lastCachedInventoryFetch.filter(({ tradable }) => !!tradable);
+        }
+
+        return this.lastCachedInventoryFetch;
+    }
+
+    getFromCachedInventory(assetid: string): EconItem | null {
+        return this.lastCachedInventoryFetch.find(item => item.assetid === assetid) || null;
     }
 
     findByAssetid(assetid: string): string | null {

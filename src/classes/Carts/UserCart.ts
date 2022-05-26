@@ -1,7 +1,7 @@
 import pluralize from 'pluralize';
 import SKU from '@tf2autobot/tf2-sku';
 import Currencies from '@tf2autobot/tf2-currencies';
-import async from 'async';
+import async, { mapValuesSeries } from 'async';
 import { ItemsDict, OurTheirItemsDict, Prices } from '@tf2autobot/tradeoffer-manager';
 import Cart from './Cart';
 import Inventory, { getSkuAmountCanTrade, DictItem } from '../Inventory';
@@ -9,6 +9,8 @@ import TF2Inventory from '../TF2Inventory';
 import log from '../../lib/logger';
 import { noiseMakers } from '../../lib/data';
 import { pure } from '../../lib/tools/export';
+import { Entry } from '../Pricelist';
+import { stringifyHvAttributes } from '../Commands/functions/utils';
 
 type WhichHighValue = 'our' | 'their';
 
@@ -135,12 +137,26 @@ export default class UserCart extends Cart {
             }
 
             const match = this.bot.pricelist.getPrice(sku, true);
+
             if (match === null) {
                 // Ignore items that are no longer in the pricelist
                 continue;
             }
 
-            value += match[which === 'our' ? 'sell' : 'buy'].toValue(keyPrice.metal) * this[which][sku];
+            if (which === 'our') {
+                const assets = this.our[sku]?.assets || [];
+                const genericAmount = this.our[sku].amount - assets.length;
+
+                for (const id of assets) {
+                    const item = this.bot.pricelist.getAssetPrice(id) || match;
+
+                    value += item.sell.toValue(keyPrice.metal);
+                }
+
+                value += match.sell.toValue(keyPrice.metal) * genericAmount;
+            } else {
+                value += match.buy.toValue(keyPrice.metal) * this.their[sku].amount;
+            }
         }
 
         return Currencies.toCurrencies(value, this.canUseKeys ? keyPrice.metal : undefined);
@@ -293,21 +309,21 @@ export default class UserCart extends Cart {
         const summary = super.summarizeOur();
 
         const ourDict = (this.offer.data('dict') as ItemsDict).our;
-        const scrap = ourDict['5000;6'] || 0;
-        const reclaimed = ourDict['5001;6'] || 0;
-        const refined = ourDict['5002;6'] || 0;
+        const scrap = ourDict['5000;6']?.amount || 0;
+        const reclaimed = ourDict['5001;6']?.amount || 0;
+        const refined = ourDict['5002;6']?.amount || 0;
 
         let addWeapons = 0;
         if (this.isWeaponsAsCurrencyEnabled) {
             this.weapons.forEach(sku => {
-                addWeapons += ourDict[sku] || 0;
+                addWeapons += ourDict[sku]?.amount || 0;
             });
         }
 
         if (this.getCurrencies.isBuyer) {
             summary.push(
                 new Currencies({
-                    keys: this.canUseKeys ? ourDict['5021;6'] || 0 : 0,
+                    keys: this.canUseKeys ? ourDict['5021;6']?.amount || 0 : 0,
                     metal: Currencies.toRefined(scrap + reclaimed * 3 + refined * 9 + addWeapons * 0.5)
                 }).toString()
             );
@@ -327,21 +343,21 @@ export default class UserCart extends Cart {
         const summary = super.summarizeTheir();
 
         const theirDict = (this.offer.data('dict') as ItemsDict).their;
-        const scrap = theirDict['5000;6'] || 0;
-        const reclaimed = theirDict['5001;6'] || 0;
-        const refined = theirDict['5002;6'] || 0;
+        const scrap = theirDict['5000;6']?.amount || 0;
+        const reclaimed = theirDict['5001;6']?.amount || 0;
+        const refined = theirDict['5002;6']?.amount || 0;
 
         let addWeapons = 0;
         if (this.isWeaponsAsCurrencyEnabled) {
             this.weapons.forEach(sku => {
-                addWeapons += theirDict[sku] || 0;
+                addWeapons += theirDict[sku]?.amount || 0;
             });
         }
 
         if (!this.getCurrencies.isBuyer) {
             summary.push(
                 new Currencies({
-                    keys: this.canUseKeys ? theirDict['5021;6'] || 0 : 0,
+                    keys: this.canUseKeys ? theirDict['5021;6']?.amount || 0 : 0,
                     metal: Currencies.toRefined(scrap + reclaimed * 3 + refined * 9 + addWeapons * 0.5)
                 }).toString()
             );
@@ -401,7 +417,7 @@ export default class UserCart extends Cart {
                         pluralize(this.bot.schema.getName(SKU.fromString(sku), false), ourAssetidsCount, true);
 
                     // Add the max amount to the cart
-                    this.addOurItem(sku, amount);
+                    this.addOurItem(sku, amount, this.our[sku].assets);
                 }
             }
 
@@ -420,7 +436,7 @@ export default class UserCart extends Cart {
                     )}`;
 
                     // Add the amount we can trade
-                    this.addOurItem(sku, skuCount.mostCanTrade);
+                    this.addOurItem(sku, skuCount.mostCanTrade, this.our[sku].assets);
                 }
             }
 
@@ -487,7 +503,7 @@ export default class UserCart extends Cart {
                         pluralize(this.bot.schema.getName(SKU.fromString(sku), false), theirAssetidsCount, true);
 
                     // Add the max amount to the cart
-                    this.addTheirItem(sku, amount);
+                    this.addTheirItem(sku, amount, this.their[sku].assets);
                 }
             }
 
@@ -505,7 +521,7 @@ export default class UserCart extends Cart {
                     )}`;
 
                     // Add the amount we can trade
-                    this.addTheirItem(sku, skuCount.mostCanTrade);
+                    this.addTheirItem(sku, skuCount.mostCanTrade, this.their[sku].assets);
                 }
             }
 
@@ -607,9 +623,32 @@ export default class UserCart extends Cart {
                 continue;
             }
 
-            const amount = this.our[sku];
-            const assetids = ourInventory.findBySKU(sku, true);
+            const amount = this.our[sku].amount;
+            const assetsAvailable = ourInventory.findBySKU(sku, true);
+            const assetids = [
+                ...(this.our[sku].assets || []),
+                ...assetsAvailable.filter(
+                    id => !this.our[sku].assets.includes(id) && this.bot.pricelist.getAssetPrice(id) === null
+                )
+            ];
             const ourAssetidsCount = assetids.length;
+
+            if (ourAssetidsCount !== this.our[sku].amount) {
+                // I'm almost 100% sure that this is only reachable if we have we have a _priced asset_ to this sku
+                // If this ^ is true, then the 'find' is unnecessary. Using it as a sanity check
+                const particularlyPricedAssets = assetsAvailable.filter(
+                    id => this.bot.pricelist.getAssetPrice(id) !== null
+                );
+
+                return Promise.reject(
+                    `I am not selling the generic version of "${this.bot.pricelist.getPrice(sku).name}"` +
+                        (particularlyPricedAssets.length > 0
+                            ? `\nBut I'm selling these:\n ${particularlyPricedAssets
+                                  .map(myAsset => `!buy ${myAsset} - ${stringifyHvAttributes(this.bot, sku, myAsset)}`)
+                                  .join('\n')}`
+                            : '')
+                );
+            }
 
             this.ourItemsCount += amount;
             let missing = amount;
@@ -674,7 +713,7 @@ export default class UserCart extends Cart {
                 continue;
             }
 
-            const amount = this.their[sku];
+            const amount = this.their[sku].amount;
             let assetids = theirInventory.findBySKU(sku, true);
 
             const addToDupeCheckList =
@@ -876,8 +915,21 @@ export default class UserCart extends Cart {
                         });
 
                         if (isAdded) {
-                            const amount = (itemsDict[whose][sku] || 0) + 1;
-                            itemsDict[whose][sku] = amount;
+                            log.debug('Added changes:', {
+                                whose: whose,
+                                sku: sku,
+                                assetid: currencies[sku][i]
+                            });
+
+                            const amount = (itemsDict[whose][sku]?.amount || 0) + 1;
+                            if (itemsDict[whose][sku]) {
+                                itemsDict[whose][sku].amount = amount;
+                            } else {
+                                itemsDict[whose][sku] = {
+                                    assets: [],
+                                    amount: amount
+                                };
+                            }
 
                             if (whose === 'our') {
                                 this.ourItemsCount += amount;
@@ -916,7 +968,10 @@ export default class UserCart extends Cart {
             }
 
             const amount = required.currencies[sku];
-            itemsDict[isBuyer ? 'our' : 'their'][sku] = amount;
+            itemsDict[isBuyer ? 'our' : 'their'][sku] = {
+                assets: [],
+                amount: amount
+            };
 
             if (isBuyer) {
                 this.ourItemsCount += amount;
@@ -973,9 +1028,20 @@ export default class UserCart extends Cart {
                 continue;
             }
 
+            let currItem: Entry | null = null;
+
+            if (this.our[sku].assets.length > 0) {
+                const asset = this.our[sku][0];
+                currItem = this.bot.pricelist.getAssetPrice(asset, true);
+            }
+
+            if (!currItem) {
+                currItem = this.bot.pricelist.getPrice(sku, true);
+            }
+
             itemPrices[sku] = {
-                buy: this.bot.pricelist.getPrice(sku, true).buy,
-                sell: this.bot.pricelist.getPrice(sku, true).sell
+                buy: currItem.buy,
+                sell: currItem.sell
             };
         }
 
@@ -1048,7 +1114,15 @@ export default class UserCart extends Cart {
                 continue;
             }
 
-            str += `\n- ${this.our[sku]}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
+            const genericAmount = this.our[sku].amount - this.our[sku].assets.length;
+
+            this.our[sku].assets.forEach(id => {
+                str += `\n- ${this.bot.schema.getName(SKU.fromString(sku), false)} (${id})`;
+            });
+
+            if (genericAmount > 0) {
+                str += `\n- ${genericAmount}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
+            }
         }
 
         if (isBuyer) {
@@ -1062,7 +1136,7 @@ export default class UserCart extends Cart {
                 continue;
             }
 
-            str += `\n- ${this.their[sku]}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
+            str += `\n- ${this.their[sku].amount}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
         }
 
         if (!isBuyer) {

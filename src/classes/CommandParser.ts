@@ -4,6 +4,8 @@ import { parseJSON } from '../lib/helpers';
 
 export default class CommandParser {
     static getCommand(message: string): string | null {
+        message = unboldCommand(message);
+
         if (message.startsWith('!')) {
             const index = message.indexOf(' ');
 
@@ -14,6 +16,7 @@ export default class CommandParser {
     }
 
     static removeCommand(message: string): string {
+        message = unboldMessage(unboldCommand(message));
         return message.substring(message.indexOf(' ') + 1);
     }
 
@@ -58,4 +61,32 @@ export default class CommandParser {
 
         return parsed;
     }
+}
+
+function unboldCommand(str: string): string {
+    if (/^!?𝗯/.test(str)) {
+        str = str.replace(/^!?𝗯(𝘂𝘆)?/, '!buy');
+    } else if (/^!?𝘀/.test(str)) {
+        str = str.replace(/^!?𝘀(𝗲𝗹𝗹)?/, '!sell');
+    } else if (/^(b(uy)?|s(ell)?) /.test(str)) {
+        str = '!' + str;
+    }
+
+    return str;
+}
+
+function unboldMessage(str: string): string {
+    return str
+        .replace('𝗯𝘂𝘆', 'buy')
+        .replace('𝘀𝗲𝗹𝗹', 'sell')
+        .replace(/𝟬/g, '0')
+        .replace(/𝟭/g, '1')
+        .replace(/𝟮/g, '2')
+        .replace(/𝟯/g, '3')
+        .replace(/𝟰/g, '4')
+        .replace(/𝟱/g, '5')
+        .replace(/𝟲/g, '6')
+        .replace(/𝟳/g, '7')
+        .replace(/𝟴/g, '8')
+        .replace(/𝟵/g, '9');
 }

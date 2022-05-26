@@ -43,7 +43,7 @@ export interface PricesTfAuthAccessResponse {
 }
 
 export default class PricesTfApi {
-    public static readonly URL = 'https://api2.prices.tf';
+    public static readonly URL = process.env.CUSTOM_PRICER_URL_2 || 'https://api2.prices.tf';
 
     public token = '';
 
@@ -125,7 +125,7 @@ export default class PricesTfApi {
 
     getOptions(): PricerOptions {
         return {
-            pricerUrl: 'https://api2.prices.tf'
+            pricerUrl: 'http://localhost:8080'
         };
     }
 }

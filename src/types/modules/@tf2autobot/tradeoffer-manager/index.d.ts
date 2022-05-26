@@ -124,7 +124,11 @@ declare module '@tf2autobot/tradeoffer-manager' {
         }
 
         export interface OurTheirItemsDict {
-            [sku: string]: number;
+            //[sku: string]: number;
+            [sku: string]: {
+                assets: string[];
+                amount: number;
+            };
         }
 
         export interface ItemsValue {

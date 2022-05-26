@@ -13,6 +13,28 @@ export default class HelpCommands {
 
         this.bot.sendMessage(
             steamID,
+            [
+                '- !help - Get a list of commands',
+                '!how2trade - Guide on how to trade with the bot',
+                '!buy <item name> - Instantly buy an item',
+                '!sell <item name> - Instantly sell an item',
+                '!buycart - Add an item you want to buy to your cart',
+                '!sellcart - Add an item you want to sell to your cart',
+                '!cart - View your cart',
+                '!clearcart - Clear your cart',
+                "!rate - Get the bot's current key rates",
+                '!stock - Link to all my listings on BackpackTF' +
+                    '\n\nThe following commands will only work if I have listings for their respective items on BpTF:',
+                '!buykeys/!sellkeys [amount] - Buy/sell keys from/to me',
+                '!buytickets/!selltickets [amount] - MvM tickets',
+                '!buysaxtons/!sellsaxtons [amount] - Secret saxtons'
+            ].join('\n - ')
+        );
+
+        return;
+
+        this.bot.sendMessage(
+            steamID,
             `📌 Note 📌${
                 isAdmin
                     ? '\n• a = Directly add "a"' +

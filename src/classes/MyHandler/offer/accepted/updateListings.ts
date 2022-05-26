@@ -526,7 +526,7 @@ export default function updateListings(
             alwaysRemoveCustomTexture &&
             dict.their[sku] !== undefined
         ) {
-            const amountTraded = dict.their[sku];
+            const amountTraded = dict.their[sku].amount;
             const assetids = inventory.findBySKU(sku, true).sort((a, b) => parseInt(b) - parseInt(a)); // descending order
             const assetidsTraded = assetids.slice(0).splice(0, amountTraded);
 

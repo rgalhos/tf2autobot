@@ -8,6 +8,9 @@ export const addSchema: jsonschema.Schema = {
             // sku of the item
             type: 'string'
         },
+        code: {
+            type: 'integer'
+        },
         enabled: {
             // if we are actually trading the item
             type: 'boolean'

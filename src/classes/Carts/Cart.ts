@@ -9,6 +9,7 @@ import Bot from '../Bot';
 import { BPTFGetUserInfo } from '../MyHandler/interfaces';
 import log from '../../lib/logger';
 import { sendAlert } from '../../lib/DiscordWebhook/export';
+import { stringifyHvAttributes } from '../Commands/functions/utils';
 
 /**
  * An abstract class used for sending offers
@@ -142,7 +143,7 @@ export default abstract class Cart {
     // }
 
     getOurCount(sku: string): number {
-        return this.our[sku] || 0;
+        return this.our[sku]?.amount || 0;
     }
 
     getOurGenericCount(sku: string): number {
@@ -168,25 +169,35 @@ export default abstract class Cart {
     }
 
     getTheirCount(sku: string): number {
-        return this.their[sku] || 0;
+        return this.their[sku]?.amount || 0;
     }
 
     getTheirGenericCount(sku: string): number {
         return this.getGenericCount(sku, s => this.getTheirCount(s));
     }
 
-    addOurItem(sku: string, amount = 1): void {
-        this.our[sku] = this.getOurCount(sku) + amount;
+    isAsset(value: string) {
+        return /^\d+$/.test(value) && this.bot.pricelist.getAssetPrice(value) !== null;
+    }
 
-        if (this.our[sku] < 1) {
+    addOurItem(sku: string, amount = 1, assets: string[] = []): void {
+        this.our[sku] = {
+            assets: [...(this.our[sku]?.assets || []), ...assets.filter(asset => typeof asset === 'string')],
+            amount: this.getOurCount(sku) + amount
+        };
+
+        if (this.our[sku].amount < 1) {
             delete this.our[sku];
         }
     }
 
-    addTheirItem(sku: string, amount = 1): void {
-        this.their[sku] = this.getTheirCount(sku) + amount;
+    addTheirItem(sku: string, amount = 1, assets: string[] = []): void {
+        this.their[sku] = {
+            assets: [],
+            amount: this.getTheirCount(sku) + amount
+        };
 
-        if (this.their[sku] < 1) {
+        if (this.their[sku].amount < 1) {
             delete this.their[sku];
         }
     }
@@ -255,7 +266,20 @@ export default abstract class Cart {
                 continue;
             }
 
-            items.push({ name: this.bot.schema.getName(SKU.fromString(sku), false), amount: this.our[sku] });
+            const genericAmount = this.our[sku].amount - this.our[sku].assets.length;
+
+            this.our[sku].assets.forEach(id => {
+                const hvStr = stringifyHvAttributes(this.bot, sku, id);
+
+                items.push({
+                    name: `${this.bot.schema.getName(SKU.fromString(sku), false)} ${!!hvStr ? `(${hvStr})` : ''})`,
+                    amount: 1
+                });
+            });
+
+            if (genericAmount > 0) {
+                items.push({ name: this.bot.schema.getName(SKU.fromString(sku), false), amount: genericAmount });
+            }
         }
 
         let summary: string[];
@@ -285,7 +309,7 @@ export default abstract class Cart {
 
             items.push({
                 name: this.bot.schema.getName(SKU.fromString(sku), false),
-                amount: this.their[sku]
+                amount: this.their[sku].amount
             });
         }
 
@@ -491,7 +515,15 @@ export default abstract class Cart {
                 continue;
             }
 
-            str += `\n- ${this.our[sku]}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
+            const genericAmount = this.our[sku].amount - this.our[sku].assets.length;
+
+            this.our[sku].assets.forEach(id => {
+                str += `\n- ${this.bot.schema.getName(SKU.fromString(sku), false)} (${id})`;
+            });
+
+            if (genericAmount > 0) {
+                str += `\n- ${genericAmount}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
+            }
         }
 
         if (!isDonating) {
@@ -501,7 +533,7 @@ export default abstract class Cart {
                     continue;
                 }
 
-                str += `\n- ${this.their[sku]}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
+                str += `\n- ${this.their[sku].amount}x ${this.bot.schema.getName(SKU.fromString(sku), false)}`;
             }
         }
 

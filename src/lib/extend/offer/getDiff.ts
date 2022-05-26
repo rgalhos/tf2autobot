@@ -16,10 +16,7 @@ export = function (): UnknownDictionary<number> | null {
             continue;
         }
 
-        diff[sku] =
-            (diff[sku] || 0) -
-            (typeof dict.our[sku] === 'object' ? (dict.our[sku]['amount'] as number) : dict.our[sku]);
-        // compatible with polldata from before v3.0.0^^^      before v2.2.0 and/or v3.0.0 or later^^
+        diff[sku] = (diff[sku] || 0) - dict.our[sku].amount;
     }
 
     for (const sku in dict.their) {
@@ -27,10 +24,7 @@ export = function (): UnknownDictionary<number> | null {
             continue;
         }
 
-        diff[sku] =
-            (diff[sku] || 0) +
-            (typeof dict.their[sku] === 'object' ? (dict.their[sku]['amount'] as number) : dict.their[sku]);
-        // compatible with polldata from before v3.0.0^^^      before v2.2.0 and/or v3.0.0 or later^^
+        diff[sku] = (diff[sku] || 0) + dict.their[sku].amount;
     }
 
     return diff;

@@ -80,9 +80,16 @@ const consoleFormat = winston.format.combine(
     })
 );
 
-// export interface BetterLogger extends winston.Logger {
-//     exception: (error: Error, prefix?: string) => BetterLogger;
-// }
+export interface BetterLogger extends winston.Logger {
+    exception: (error: Error, prefix?: string) => BetterLogger;
+    // I just added these methods to prevent some stupid VS Code errors
+    // I know, I'm doing something wrong
+    debug: (...args: any[]) => any;
+    info: (...args: any[]) => any;
+    error: (...args: any[]) => any;
+    verbose: (...args: any[]) => any;
+    warn: (...args: any[]) => any;
+}
 
 const logger = winston.createLogger({
     levels: levels

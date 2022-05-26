@@ -830,11 +830,11 @@ export default class Trades {
                                 : getPureValue(sku));
                     }
 
-                    dataDict[whichSide][sku] ??= 0;
-                    dataDict[whichSide][sku] += amount;
+                    dataDict[whichSide][sku].amount ??= 0;
+                    dataDict[whichSide][sku].amount += amount;
 
                     // For removing 0's from the dict
-                    if (dataDict[whichSide][sku] === 0) {
+                    if (dataDict[whichSide][sku].amount === 0) {
                         delete dataDict[whichSide][sku];
                     }
                 }
@@ -956,24 +956,48 @@ export default class Trades {
                         return (
                             Object.keys(dataDict[side])
                                 .map(sku => {
-                                    if (prices[sku] === undefined && !puresWithKeys.includes(sku)) {
-                                        hasMissingPrices = true;
-                                        return 0;
+                                    const assetid = side === 'our' && /^\d+$/.test(sku) ? sku : null;
+
+                                    if (assetid) {
+                                        sku = this.bot.pricelist.getAssetPrice(assetid).sku;
+
+                                        if (prices[assetid] === undefined) {
+                                            hasMissingPrices = true;
+                                            return 0;
+                                        }
+
+                                        if (sku == '5021;6')
+                                            keyDifference += dataDict[side][sku].amount * (side == 'our' ? 1 : -1);
+                                        if (!dataDict[side][sku] || getPureValue(sku as any) !== 0) return 0;
+
+                                        possibleKeyTrade = false;
+
+                                        return (
+                                            1 *
+                                            (prices[assetid][buySell].keys * keyPriceScrap +
+                                                Currencies.toScrap(prices[assetid][buySell].metal))
+                                        );
+                                    } else {
+                                        if (prices[sku] === undefined && !puresWithKeys.includes(sku)) {
+                                            hasMissingPrices = true;
+                                            return 0;
+                                        }
+
+                                        if (sku == '5021;6')
+                                            keyDifference += dataDict[side][sku].amount * (side == 'our' ? 1 : -1);
+                                        if (!dataDict[side][sku] || getPureValue(sku as any) !== 0) return 0;
+
+                                        possibleKeyTrade = false; //Offer contains something other than pures
+
+                                        if (isWACEnabled && weapons.includes(sku))
+                                            return 0.5 * dataDict[side][sku].amount;
+
+                                        return (
+                                            dataDict[side][sku].amount *
+                                            (prices[sku][buySell].keys * keyPriceScrap +
+                                                Currencies.toScrap(prices[sku][buySell].metal))
+                                        );
                                     }
-
-                                    if (sku == '5021;6')
-                                        keyDifference += dataDict[side][sku] * (side == 'our' ? 1 : -1);
-                                    if (!dataDict[side][sku] || getPureValue(sku as any) !== 0) return 0;
-
-                                    possibleKeyTrade = false; //Offer contains something other than pures
-
-                                    if (isWACEnabled && weapons.includes(sku)) return 0.5 * dataDict[side][sku];
-
-                                    return (
-                                        dataDict[side][sku] *
-                                        (prices[sku][buySell].keys * keyPriceScrap +
-                                            Currencies.toScrap(prices[sku][buySell].metal))
-                                    );
                                 })
                                 .reduce((a, b) => a + b, 0) * (side == 'their' ? -1 : 1)
                         );
@@ -1029,8 +1053,8 @@ export default class Trades {
                         if (isAdded) {
                             NonPureWorth -= 0.5;
                             tradeValues['their'].scrap += 0.5;
-                            dataDict['their'][chosenOne] ??= 0;
-                            dataDict['their'][chosenOne] += 1;
+                            dataDict['their'][chosenOne].amount ??= 0;
+                            dataDict['their'][chosenOne].amount += 1;
 
                             const isInPricelist = this.bot.pricelist.getPrice(chosenOne, false);
 

@@ -243,19 +243,21 @@ export default class CartQueue {
             .then(status => {
                 log.debug('Sent offer');
                 if (status === 'pending') {
-                    const sendNotification = isDonating
-                        ? custom.hasBeenMadeAcceptingMobileConfirmation.donation
+                    if (custom.hasBeenMadeAcceptingMobileConfirmation?.enabled !== false) {
+                        const sendNotification = isDonating
                             ? custom.hasBeenMadeAcceptingMobileConfirmation.donation
-                            : `⌛ Your donation has been made! Please wait while I accept the mobile confirmation.`
-                        : isBuyingPremium
-                        ? custom.hasBeenMadeAcceptingMobileConfirmation.isBuyingPremium
+                                ? custom.hasBeenMadeAcceptingMobileConfirmation.donation
+                                : `⌛ Your donation has been made! Please wait while I accept the mobile confirmation.`
+                            : isBuyingPremium
                             ? custom.hasBeenMadeAcceptingMobileConfirmation.isBuyingPremium
-                            : `⌛ Your premium purchase has been made! Please wait while I accept the mobile confirmation.`
-                        : custom.hasBeenMadeAcceptingMobileConfirmation.offer
-                        ? custom.hasBeenMadeAcceptingMobileConfirmation.offer
-                        : `⌛ Your offer has been made! Please wait while I accept the mobile confirmation.`;
+                                ? custom.hasBeenMadeAcceptingMobileConfirmation.isBuyingPremium
+                                : `⌛ Your premium purchase has been made! Please wait while I accept the mobile confirmation.`
+                            : custom.hasBeenMadeAcceptingMobileConfirmation.offer
+                            ? custom.hasBeenMadeAcceptingMobileConfirmation.offer
+                            : `⌛ Your offer has been made! Please wait while I accept the mobile confirmation.`;
 
-                    cart.sendNotification = sendNotification;
+                        cart.sendNotification = sendNotification;
+                    }
 
                     log.debug('Accepting mobile confirmation...');
 

@@ -35,7 +35,134 @@ export default class Listings {
         };
     }
 
+    checkByAsset(assetIdentifier: string, data?: Entry | null) {
+        // result of a _kinda_ bad design from my part
+        const assetid = assetIdentifier.replace('assetid:', '');
+        const match = this.bot.pricelist.getAssetPrice(assetid, true);
+
+        if (match === null) {
+            log.error(`Asset ${assetid} fell into checkByAsset but we didn't find it on pricelist. Removing listing`, {
+                assetid,
+                assetIdentifier,
+                match
+            });
+
+            this.bot.listingManager.removeListing('440_' + assetid);
+
+            return;
+        }
+
+        const sku = match.sku;
+
+        let hasSellListing = false;
+
+        log.debug(`Checking particularly priced asset ${assetid}, sku: ${sku}`);
+
+        if (!this.isCreateListing) {
+            return;
+        }
+
+        const canSell = !!this.bot.inventoryManager.getInventory.findByAssetid(assetid);
+
+        if (!canSell) {
+            // TO DO
+            log.error('Cannot sell custom asset: ', JSON.stringify({ assetid, canSell, sku: match.sku }));
+            return;
+        }
+
+        const allAssetsForSku = this.bot.inventoryManager.getInventory.findBySKU(sku);
+        const genericItem = this.bot.pricelist.getPrice(sku);
+
+        if (!genericItem.enabled) {
+            log.debug(`Generic listing for ${sku} is disabled. Removing all asset listings...`);
+        }
+
+        this.bot.listingManager.findListings(sku).forEach(listing => {
+            const listingAsset = listing.id.replace('440_', '');
+
+            if (!genericItem.enabled || genericItem.intent === 0) {
+                log.debug(
+                    `Generic listing for ${sku} is disabled or it's intent is set to 'buy'. Removing asset ${listingAsset}`
+                );
+                listing.remove();
+                return;
+            }
+
+            log.debug(`Found the particular listing for ${listingAsset} (${sku}). Checking if it should be updated...`);
+
+            if (!allAssetsForSku.includes(listingAsset)) {
+                log.debug(`We don't have the particularly priced asset ${listingAsset} anymore. Removing listing.`);
+                listing.remove();
+                return;
+            }
+
+            if (listingAsset === assetid) {
+                if (match === null) {
+                    log.debug(`Asset was not found in pricelist (This should be unreachable tho)`);
+                    listing.remove();
+                    return;
+                }
+
+                hasSellListing = true;
+                let hasListingChanged = false;
+
+                const newDetails = this.getDetails(
+                    1,
+                    1,
+                    match,
+                    this.bot.inventoryManager.getInventory.getItems[sku]?.filter(item => item.id === assetid)[0]
+                );
+
+                if (listing.currencies.keys !== match.sell.keys || listing.currencies.metal !== match.sell.metal) {
+                    hasListingChanged = true;
+                } else if (newDetails !== listing.details) {
+                    hasListingChanged = true;
+                }
+
+                // TO DO: Also check if user is updating the notes
+                if (hasListingChanged) {
+                    listing.remove();
+
+                    log.debug(`Listing details for asset ${assetid} don't match, indeed. Updating listing...`);
+
+                    this.bot.listingManager.createListing({
+                        time: match.time || dayjs().unix(),
+                        id: assetid,
+                        intent: 1,
+                        promoted: match.promoted,
+                        details: newDetails,
+                        currencies: match.sell
+                    });
+                } else {
+                    log.debug(`Listing details for ${assetid} did not change`);
+                }
+            }
+        });
+
+        if (!hasSellListing && genericItem.enabled && genericItem.intent !== 0) {
+            this.bot.listingManager.createListing({
+                time: match.time || dayjs().unix(),
+                id: assetid,
+                intent: 1,
+                promoted: match.promoted,
+                details: this.getDetails(
+                    1,
+                    1,
+                    match,
+                    this.bot.inventoryManager.getInventory.getItems[sku]?.filter(item => item.id === assetid)[0]
+                ),
+                currencies: match.sell
+            });
+        }
+    }
+
     checkBySKU(sku: string, data?: Entry | null, generics = false, showLogs = false): void {
+        const receivedAnAsset = this.bot.pricelist.getAssetPrice(sku.replace('assetid:', ''), true) !== null;
+
+        if (receivedAnAsset) {
+            return this.checkByAsset(sku, data);
+        }
+
         if (!this.isCreateListing) {
             return;
         }
@@ -59,7 +186,36 @@ export default class Listings {
 
         const isFilterCantAfford = this.bot.options.pricelist.filterCantAfford.enable; // false by default
 
+        inventory
+            .findBySKU(sku, true)
+            .filter(id => this.bot.pricelist.getAssetPrice(id) !== null)
+            .forEach(id => {
+                this.checkByAsset(id);
+            });
+
         this.bot.listingManager.findListings(sku).forEach(listing => {
+            const isParticularlyPriced = this.bot.pricelist.getAssetPrice(listing.id.replace('440_', '')) !== null;
+
+            if (isParticularlyPriced) {
+                this.checkByAsset(listing.id.replace('440_', ''));
+                if (showLogs) {
+                    log.debug(
+                        `Found a listing for an particularly priced asset (${listing.id.replace(
+                            '440_',
+                            ''
+                        )} - ${sku}).` + ' Skipping because we are looking for the generic one.'
+                    );
+                }
+                return;
+            }
+
+            if (showLogs) {
+                log.debug(
+                    `Found the generic listing for ${sku} ` +
+                        `(${listing.intent === 0 ? 'buy' : 'sell'} order). Checking if it should be updated...`
+                );
+            }
+
             if (listing.intent === 1 && hasSellListing) {
                 if (showLogs) {
                     log.debug('Already have a sell listing, remove the listing.');
@@ -136,7 +292,6 @@ export default class Listings {
                     // if (listing.intent === 0) {
                     //     toUpdate['quantity'] = amountCanBuy;
                     // }
-
                     listing.update(toUpdate);
                     //TODO: make promote, demote
                 }
@@ -146,7 +301,7 @@ export default class Listings {
         const matchNew = data?.enabled === false ? null : this.bot.pricelist.getPrice(sku, true, generics);
 
         if (matchNew !== null && matchNew.enabled === true) {
-            const assetids = inventory.findBySKU(sku, true);
+            let assetids = inventory.findBySKU(sku, true);
 
             const canAffordToBuy = isFilterCantAfford
                 ? invManager.isCanAffordToBuy(matchNew.buy, invManager.getInventory)
@@ -169,26 +324,38 @@ export default class Listings {
                 });
             }
 
+            if (assetids.length === 0) {
+                return;
+            }
+
             if (!hasSellListing && amountCanSell > 0) {
                 if (showLogs) {
-                    log.debug(`We have no sell order and we can sell items, create sell listing.`);
+                    log.debug(`We have no sell order and we might have items to sell, checking...`);
                 }
 
                 doneSomething = true;
 
-                this.bot.listingManager.createListing({
-                    time: matchNew.time || dayjs().unix(),
-                    id: assetids[assetids.length - 1],
-                    intent: 1,
-                    promoted: matchNew.promoted,
-                    details: this.getDetails(
-                        1,
-                        amountCanSell,
-                        matchNew,
-                        inventory.getItems[sku]?.filter(item => item.id === assetids[assetids.length - 1])[0]
-                    ),
-                    currencies: matchNew.sell
-                });
+                const genericItemsToSell = assetids.filter(id => this.bot.pricelist.getAssetPrice(id) === null);
+
+                if (genericItemsToSell.length >= 1) {
+                    if (showLogs) {
+                        log.debug(`Found ${genericItemsToSell.length} generic item(s) for ${sku}. Creating order...`);
+                    }
+
+                    this.bot.listingManager.createListing({
+                        time: matchNew.time || dayjs().unix(),
+                        id: genericItemsToSell[0],
+                        intent: 1,
+                        promoted: matchNew.promoted,
+                        details: this.getDetails(
+                            1,
+                            amountCanSell,
+                            matchNew,
+                            inventory.getItems[sku]?.filter(item => item.id === genericItemsToSell[0])[0]
+                        ),
+                        currencies: matchNew.sell
+                    });
+                }
             }
         }
 
@@ -509,17 +676,19 @@ export default class Listings {
         const isShowBoldOnAmount = showBoldText.onAmount;
         const isShowBoldOnCurrentStock = showBoldText.onCurrentStock;
         const isShowBoldOnMaxStock = showBoldText.onMaxStock;
+        const isShowBoldOnCodeCommand = showBoldText.buySellCodeCommand;
         const style = showBoldText.style;
+
+        const currentStock = inventory.getAmount(entry.sku, false, true).toString();
 
         const replaceDetails = (details: string, entry: Entry, key: 'buy' | 'sell') => {
             const price = entry[key].toString();
             const maxStock = entry.max === -1 ? '∞' : entry.max.toString();
-            const currentStock = inventory.getAmount(entry.sku, false, true).toString();
             const amountTrade = amountCanTrade.toString();
 
             return details
                 .replace(/%price%/g, isShowBoldOnPrice ? boldDetails(price, style) : price)
-                .replace(/%name%/g, useSku ? entry.sku : entry.name)
+                .replace(/%name%/g, useSku ? '%code%' : entry.name)
                 .replace(/%max_stock%/g, isShowBoldOnMaxStock ? boldDetails(maxStock, style) : maxStock)
                 .replace(/%current_stock%/g, isShowBoldOnCurrentStock ? boldDetails(currentStock, style) : currentStock)
                 .replace(/%amount_trade%/g, isShowBoldOnAmount ? boldDetails(amountTrade, style) : amountTrade);
@@ -576,6 +745,26 @@ export default class Listings {
             //
         }
 
+        // only use code if
+        // 1) code is defined, duuuh
+        // 2) it's not one of the following groups (gotta figure a better way to handle this)
+        let _noCode = ['all', 'halloween-hat', 'pass', 'crate', 'halloween-hat', 'keys'];
+
+        let _code: string = entry.name;
+
+        if (details.includes('%code%') && ((!isNaN(entry.code) && _noCode.indexOf(entry.group) === -1) || useSku)) {
+            _code = item?.id || _code;
+
+            if (isShowBoldOnCodeCommand) {
+                details = details.replace('!buy ', '𝗯𝘂𝘆 ').replace('!sell ', '𝘀𝗲𝗹𝗹 ');
+                _code = boldThing(String(_code));
+            } else {
+                _code = String(_code);
+            }
+        }
+
+        details = details.replace(/%code%/g, _code);
+
         const string = details + (highValueString.length > 0 ? ' ' + highValueString : '');
 
         if (string.length > 200) {
@@ -585,6 +774,7 @@ export default class Listings {
             }
 
             // else we reconstruct, but replace %name% with sku instead of item full name
+            /*
             const newDetails = this.getDetails(intent, amountCanTrade, entry, item, true);
 
             if (newDetails.length > 200) {
@@ -593,6 +783,8 @@ export default class Listings {
             }
 
             return newDetails;
+            */
+            return string.slice(0, 200);
         }
 
         return string;
@@ -611,6 +803,22 @@ function getAttachmentName(attachment: string, pSKU: string, paints: Paints, par
     else if (attachment === 'ke') return getKeyByValue(killstreakersData, pSKU);
     else if (attachment === 'ks') return getKeyByValue(sheensData, pSKU);
     else if (attachment === 'p') return getKeyByValue(paints, pSKU);
+}
+
+function boldThing(str: string) {
+    return str
+        .replace('buy', '𝗯𝘂𝘆')
+        .replace('sell', '𝘀𝗲𝗹𝗹')
+        .replace(/0/g, '𝟬')
+        .replace(/1/g, '𝟭')
+        .replace(/2/g, '𝟮')
+        .replace(/3/g, '𝟯')
+        .replace(/4/g, '𝟰')
+        .replace(/5/g, '𝟱')
+        .replace(/6/g, '𝟲')
+        .replace(/7/g, '𝟳')
+        .replace(/8/g, '𝟴')
+        .replace(/9/g, '𝟵');
 }
 
 function boldDetails(str: string, style: number): string {

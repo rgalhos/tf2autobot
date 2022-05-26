@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { randomBytes } from 'crypto';
 import dayjs from 'dayjs';
 import Currencies from '@tf2autobot/tf2-currencies';
 import SKU from '@tf2autobot/tf2-sku';
@@ -19,6 +20,7 @@ export enum PricelistChangedSource {
 
 export interface EntryData {
     sku: string;
+    code?: number;
     enabled: boolean;
     autoprice: boolean;
     min: number;
@@ -35,6 +37,8 @@ export interface EntryData {
 
 export class Entry implements EntryData {
     sku: string;
+
+    code: number;
 
     name: string;
 
@@ -64,6 +68,7 @@ export class Entry implements EntryData {
 
     private constructor(entry: EntryData, name: string) {
         this.sku = entry.sku;
+        this.code = entry.code;
         this.name = name;
         this.enabled = entry.enabled;
         this.autoprice = entry.autoprice;
@@ -137,6 +142,7 @@ export class Entry implements EntryData {
     getJSON(): EntryData {
         return {
             sku: this.sku,
+            code: this.code,
             enabled: this.enabled,
             autoprice: this.autoprice,
             min: this.min,
@@ -261,6 +267,20 @@ export default class Pricelist extends EventEmitter {
         }
 
         return null;
+    }
+
+    getAssetPrice(assetid: string, onlyEnabled = true): Entry | null {
+        return this.getPrice('asset:' + assetid, onlyEnabled);
+    }
+
+    searchByCode(search: string | number, enabledOnly = true): Entry | null {
+        const match = Object.values(this.prices).find(entry => entry.code === Number(search));
+
+        if (!match) {
+            return null;
+        }
+
+        return match;
     }
 
     searchByName(search: string, enabledOnly = true): Entry | string[] | null {
@@ -432,6 +452,16 @@ export default class Pricelist extends EventEmitter {
             }
         }
 
+        // generate a new code
+        if (!entry.code) {
+            let _newCode: number;
+            do {
+                _newCode = generateCode();
+            } while (this.searchByCode(_newCode, false) !== null);
+
+            entry.code = _newCode;
+        }
+
         if (entry.sku === '5021;6' && !entry.autoprice && src === PricelistChangedSource.Command) {
             // update key rate if manually set the price
             this.globalKeyPrices = {
@@ -460,14 +490,20 @@ export default class Pricelist extends EventEmitter {
         src: PricelistChangedSource = PricelistChangedSource.Other,
         isBulk = false,
         pricerItems: Item[] = null,
-        isLast: boolean = null
+        isLast: boolean = null,
+        assetid?: string
     ): Promise<Entry> {
-        const errors = validator(entryData, 'pricelist-add');
+        if (!assetid) {
+            const errors = validator(entryData, 'pricelist-add');
 
-        if (errors !== null) {
-            return Promise.reject(new Error(errors.join(', ')));
+            if (errors !== null) {
+                return Promise.reject(new Error(errors.join(', ')));
+            }
         }
-        if (this.hasPrice(entryData.sku, false)) {
+
+        const entryKey = assetid ? 'asset:' + assetid : entryData.sku;
+
+        if (this.hasPrice(entryKey, false)) {
             throw new Error('Item is already priced');
         }
 
@@ -488,6 +524,13 @@ export default class Pricelist extends EventEmitter {
         if (!this.schema.checkExistence(SKU.fromString(entryData.sku))) {
             throw new Error(`Item with sku ${entryData.sku} does not exist.`);
         }
+        // prevent collisions...
+        let _newCode: number;
+        do {
+            _newCode = generateCode();
+        } while (this.searchByCode(_newCode, false) !== null);
+
+        entryData.code = _newCode;
 
         const entry = Entry.fromData(entryData, this.schema);
 
@@ -497,14 +540,37 @@ export default class Pricelist extends EventEmitter {
 
         await this.validateEntry(entry, src, isBulk);
         // Add new price
-        this.prices[entry.sku] = entry;
+        this.prices[entryKey] = entry;
 
         if (emitChange) {
-            this.priceChanged(entry.sku, entry);
+            this.priceChanged(entryKey, entry);
         }
 
         if (isBulk && isLast) {
             this.transformedPricelistForBulk = undefined;
+        }
+
+        return entry;
+    }
+
+    async updateAssetPrice(
+        assetData: EntryData,
+        assetid: string,
+        emitChange: boolean,
+        src: PricelistChangedSource = PricelistChangedSource.Other
+    ) {
+        const entry = Entry.fromData(assetData, this.schema);
+
+        entry.code = this.bot.pricelist.getAssetPrice(assetid).code;
+
+        // await this.validateEntry(entry, src, false);
+
+        await this.removePrice('asset:' + assetid, false);
+
+        this.prices['asset:' + assetid] = entry;
+
+        if (emitChange) {
+            this.priceChanged('asset:' + assetid, entry);
         }
 
         return entry;
@@ -543,6 +609,8 @@ export default class Pricelist extends EventEmitter {
         if (isBulk && pricerItems !== null && this.transformedPricelistForBulk === undefined) {
             this.transformedPricelistForBulk = Pricelist.transformPricesFromPricer(pricerItems);
         }
+
+        entry.code = this.prices[entry.sku].code;
 
         await this.validateEntry(entry, src, isBulk);
 
@@ -808,6 +876,12 @@ export default class Pricelist extends EventEmitter {
     }
 
     private updateOldPrices(old: PricesObject): Promise<void> {
+        if (process.env.SKIP_GET_PRICELIST == 'true') {
+            log.debug('Skipping price source pricelist');
+
+            return Promise.resolve();
+        }
+
         log.debug('Getting pricelist...');
 
         return this.priceSource.getPricelist().then(pricelist => {
@@ -1239,4 +1313,8 @@ interface ErrorRequest {
 
 interface ErrorBody {
     message: string;
+}
+
+export function generateCode() {
+    return randomBytes(4).readUInt32BE(0);
 }

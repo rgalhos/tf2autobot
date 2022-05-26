@@ -5,7 +5,13 @@ import Currencies from '@tf2autobot/tf2-currencies';
 import dayjs from 'dayjs';
 
 import * as c from './sub-classes/export';
-import { removeLinkProtocol, getItemFromParams, getItemAndAmount, fixSKU } from './functions/utils';
+import {
+    removeLinkProtocol,
+    getItemFromParams,
+    getItemAndAmount,
+    fixSKU,
+    stringifyHvAttributes
+} from './functions/utils';
 
 import Bot from '../Bot';
 import CommandParser from '../CommandParser';
@@ -162,6 +168,22 @@ export default class Commands {
             this.priceCommand(steamID, message);
         } else if (['buy', 'b', 'sell', 's'].includes(command)) {
             this.buyOrSellCommand(steamID, message, command as Instant);
+        } else if (['buykeys', 'buykey', 'sellkeys', 'sellkey'].includes(command)) {
+            this.customBuyCommand(
+                steamID,
+                message,
+                /^buykeys?$/i.test(command) ? 'buy' : 'sell',
+                'Mann Co. Supply Crate Key'
+            );
+        } else if (['buysaxtons', 'buysaxton', 'sellsaxtons', 'sellsaxton'].includes(command)) {
+            this.customBuyCommand(steamID, message, /^buysaxtons?$/i.test(command) ? 'buy' : 'sell', 'Secret Saxton');
+        } else if (['buytickets', 'buyticket', 'selltickets', 'sellticket'].includes(command)) {
+            this.customBuyCommand(
+                steamID,
+                message,
+                /^buytickets?$/i.test(command) ? 'buy' : 'sell',
+                'Non-Craftable Tour of Duty Ticket'
+            );
         } else if (command === 'buycart') {
             this.buyCartCommand(steamID, message);
         } else if (command === 'sellcart') {
@@ -349,6 +371,7 @@ export default class Commands {
 
         const match = info.match;
         const amount = info.amount;
+        const assetid = info.assetid;
 
         let reply = '';
 
@@ -392,13 +415,28 @@ export default class Commands {
                     reply += 'a ';
                 }
 
-                reply += `${pluralize(match.name, amount)} for ${currencies.toString()}`;
+                reply += pluralize(match.name, amount);
+
+                if (assetid) {
+                    reply += ` (${stringifyHvAttributes(this.bot, match.sku, assetid)})`;
+                }
+
+                reply += ` for ${currencies.toString()}`;
             } else {
                 reply += ` and selling for ${currencies.toString()}`;
             }
+
+            this.bot.inventoryManager.getInventory
+                .findBySKU(match.sku)
+                .filter(id => this.bot.pricelist.getAssetPrice(id))
+                .forEach(id => {
+                    reply +=
+                        `\n !buy ${id} - ${match.name} (${stringifyHvAttributes(this.bot, match.sku, id)})` +
+                        `\n + ${this.bot.pricelist.getAssetPrice(id).sell.toString()}\n`;
+                });
         }
 
-        reply += `.\n📦 I have ${this.bot.inventoryManager.getInventory.getAmount(match.sku, false, true)}`;
+        reply += `\n📦 I have ${this.bot.inventoryManager.getInventory.getAmount(match.sku, false, true)}`;
 
         if (match.max !== -1 && isBuying) {
             reply += ` / ${match.max}`;
@@ -448,9 +486,31 @@ export default class Commands {
         );
 
         cart.setNotify = true;
-        cart[['b', 'buy'].includes(command) ? 'addOurItem' : 'addTheirItem'](info.match.sku, info.amount);
+        cart[['b', 'buy'].includes(command) ? 'addOurItem' : 'addTheirItem'](info.match.sku, info.amount, [
+            info.assetid
+        ]);
 
         this.addCartToQueue(cart, false, false);
+    }
+
+    /**
+     * @description Simulate a "!{intent} {amount} {itemName}" command. Eg. "!sellsaxtons 5" becomes "!sell 5 Secret Saxton"
+     * @param steamID Steam id
+     * @param message Message
+     * @param intent Intent
+     * @param itemName Item that will be bought
+     */
+    private customBuyCommand(steamID: SteamID, message: string, intent: 'buy' | 'sell', itemName: string) {
+        let amount = 1;
+
+        let arg1 = Number(CommandParser.removeCommand(message)?.trim()?.split(' ').shift());
+        if (!isNaN(arg1) && arg1 > 1) {
+            amount = arg1;
+        }
+
+        message = `!${intent} ${amount} ${itemName}`;
+
+        this.buyOrSellCommand(steamID, message, intent);
     }
 
     // Multiple items trade
@@ -529,7 +589,7 @@ export default class Commands {
                     ' has been added to your cart. Type "!cart" to view your cart summary or "!checkout" to checkout. 🛒'
             );
 
-        cart.addOurItem(info.match.sku, amount);
+        cart.addOurItem(info.match.sku, amount, [info.assetid]);
         Cart.addCart(cart);
     }
 

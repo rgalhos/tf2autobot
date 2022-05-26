@@ -32,7 +32,29 @@ export default class PricelistManagerCommands {
     }
 
     async addCommand(steamID: SteamID, message: string): Promise<void> {
-        const params = CommandParser.parseParams(CommandParser.removeCommand(removeLinkProtocol(message)));
+        const parsedParams = CommandParser.parseParams(CommandParser.removeCommand(removeLinkProtocol(message)));
+        const params: UnknownDictionaryKnownValues =
+            parsedParams.id === undefined
+                ? parsedParams
+                : {
+                      ...this.bot.pricelist.getPrice(
+                          this.bot.inventoryManager.getInventory.findByAssetid(parsedParams.id)
+                      ),
+                      ...parsedParams
+                  };
+
+        if (parsedParams.id !== undefined && params === null) {
+            return this.bot.sendMessage(
+                steamID,
+                `❌ Could not add particular item to pricelist: the generic item must be in pricelist`
+            );
+        } else if (parsedParams.id !== undefined && params !== null) {
+            params.intent = 1;
+
+            if (typeof params.note === 'object' && typeof params.note.sell === 'string') {
+                params.note.sell = params.note?.sell?.replace(/%name%/g, '%code');
+            }
+        }
 
         if (params.enabled === undefined) {
             params.enabled = true;
@@ -86,15 +108,15 @@ export default class PricelistManagerCommands {
 
         const isPremium = this.bot.handler.getBotInfo.premium;
         if (params.promoted !== undefined) {
-            if (!isPremium) {
-                return this.bot.sendMessage(
-                    steamID,
-                    `❌ This account is not Backpack.tf Premium. You can't use "promoted" parameter.`
-                );
-            }
-
             if (typeof params.promoted === 'boolean') {
                 if (params.promoted === true) {
+                    if (!isPremium) {
+                        return this.bot.sendMessage(
+                            steamID,
+                            `❌ This account is not Backpack.tf Premium. You can't use "promoted" parameter.`
+                        );
+                    }
+
                     params.promoted = 1;
                 } else {
                     params.promoted = 0;
@@ -175,11 +197,12 @@ export default class PricelistManagerCommands {
         params.sku = fixSKU(params.sku);
 
         return this.bot.pricelist
-            .addPrice(params as EntryData, true, PricelistChangedSource.Command)
+            .addPrice(params as EntryData, true, PricelistChangedSource.Command, false, null, null, parsedParams?.id)
             .then(entry => {
                 this.bot.sendMessage(
                     steamID,
-                    `✅ Added "${entry.name}" (${entry.sku})` + generateAddedReply(this.bot, isPremium, entry)
+                    `✅ Added "${entry.name}" (${entry.sku}${parsedParams?.id ? ` - ${parsedParams.id}` : ''})` +
+                        generateAddedReply(this.bot, isPremium, entry)
                 );
             })
             .catch(err => {
@@ -669,8 +692,122 @@ export default class PricelistManagerCommands {
         void autoAdd.executeAutoAdd();
     }
 
+    async updateAssetCommand(steamID: SteamID, message: string): Promise<void> {
+        const parsedParams = CommandParser.parseParams(CommandParser.removeCommand(removeLinkProtocol(message)));
+
+        if (parsedParams.id === undefined) {
+            return this.bot.sendMessage(steamID, `❌ The "id" parameter is required to update an asset`);
+        }
+
+        const asset = this.bot.pricelist.getAssetPrice(parsedParams.id)?.getJSON();
+
+        if (!asset) {
+            return this.bot.sendMessage(steamID, `❌ Asset "${parsedParams.id}" is not in pricelist`);
+        }
+
+        const oldAsset = Object.assign({}, this.bot.pricelist.getAssetPrice(parsedParams.id));
+
+        if (typeof parsedParams.promoted === 'boolean') {
+            if (parsedParams.promoted === true) {
+                asset.promoted = 1;
+            } else {
+                asset.promoted = 0;
+            }
+        } else if (typeof parsedParams.promoted === 'number') {
+            if (parsedParams.promoted !== 0 && parsedParams.promoted !== 1) {
+                return this.bot.sendMessage(steamID, `❌ "promoted" parameter must be either 0 or 1`);
+            }
+        } else if (parsedParams.promoted !== undefined) {
+            return this.bot.sendMessage(
+                steamID,
+                `❌ "promoted" parameter must be either 0 or 1, got "${typeof parsedParams.promoted}"`
+            );
+        }
+
+        if (parsedParams.sell !== undefined && typeof parsedParams.sell !== 'object') {
+            return this.bot.sendMessage(steamID, `❌ "sell" must be an object`);
+        }
+
+        asset.sell = {
+            keys: parsedParams.sell?.keys || 0,
+            metal: parsedParams.sell?.metal || 0
+        };
+
+        const keyPrice = this.bot.pricelist.getKeyPrice;
+        const generic = this.bot.pricelist.getPrice(asset.sku);
+        const genericSellPrice = new Currencies(generic.sell);
+        const assetSellPrice = new Currencies(asset.sell);
+
+        if (genericSellPrice.toValue(keyPrice.metal) > assetSellPrice.toValue(keyPrice.metal)) {
+            return this.bot.sendMessage(steamID, "❌ custom asset's price must be higher than it's generic version");
+        }
+
+        if (parsedParams.sell.keys === 0 && parsedParams.sell.metal === 0) {
+            return this.bot.sendMessage(steamID, '❌ sell price must be higher than zero');
+        }
+
+        if (parsedParams.removenotes !== undefined) {
+            asset.note = {
+                buy: null,
+                sell: null
+            };
+        }
+
+        if (parsedParams.removebuynote !== undefined) {
+            asset.note = {
+                buy: null,
+                sell: asset.note?.sell || null
+            };
+        }
+
+        if (parsedParams.removesellnote !== undefined) {
+            asset.note = {
+                buy: asset.note?.buy || null,
+                sell: null
+            };
+        }
+
+        if (parsedParams.note !== undefined && typeof parsedParams.note === 'object') {
+            if (parsedParams.note.sell) {
+                asset.note = {
+                    buy: asset.note?.buy || null,
+                    sell: parsedParams.note.sell
+                };
+            }
+
+            if (parsedParams.note.buy) {
+                asset.note = {
+                    buy: parsedParams.note.buy,
+                    sell: asset.note?.sell || null
+                };
+            }
+        } else if (parsedParams.note !== undefined) {
+            return this.bot.sendMessage(steamID, `❌ "note" is not an object`);
+        }
+
+        this.bot.pricelist
+            .updateAssetPrice(asset, parsedParams.id, true, PricelistChangedSource.Command)
+            .then(entry => {
+                this.bot.sendMessage(
+                    steamID,
+                    `✅ Updated "${entry.name}" (${entry.sku})` + this.generateUpdateReply(false, oldAsset, entry)
+                );
+            })
+            .catch((err: ErrorRequest) => {
+                this.bot.sendMessage(
+                    steamID,
+                    '❌ Failed to update pricelist entry: ' +
+                        (err.body && err.body.message ? err.body.message : err.message)
+                );
+            });
+    }
+
     async updateCommand(steamID: SteamID, message: string): Promise<void> {
         const params = CommandParser.parseParams(CommandParser.removeCommand(removeLinkProtocol(message)));
+
+        if (params.id !== undefined) {
+            return this.updateAssetCommand(steamID, message);
+        }
 
         if (typeof params.intent === 'string') {
             const intent = ['buy', 'sell', 'bank'].indexOf(params.intent.toLowerCase());
@@ -1546,8 +1683,34 @@ export default class PricelistManagerCommands {
         );
     }
 
+    async removeAssetCommand(steamID: SteamID, message: string): Promise<void> {
+        const params = CommandParser.parseParams(CommandParser.removeCommand(removeLinkProtocol(message)));
+
+        if (params.id === undefined) {
+            return this.bot.sendMessage(steamID, '❌ You must set a "id"!');
+        }
+
+        if (this.bot.pricelist.getAssetPrice(params.id) === null) {
+            return this.bot.sendMessage(steamID, `❌ Asset "${params.id}" is not in pricelist!`);
+        }
+
+        this.bot.pricelist
+            .removePrice('asset:' + params.id, true)
+            .then(entry => {
+                this.bot.sendMessage(steamID, `✅ Removed "${entry.name}" (${params.id}).`);
+                this.bot.listings.checkBySKU(entry.sku);
+            })
+            .catch(err => {
+                this.bot.sendMessage(steamID, `❌ Failed to remove pricelist entry: ${(err as Error).message}`);
+            });
+    }
+
     async removeCommand(steamID: SteamID, message: string): Promise<void> {
         const params = CommandParser.parseParams(CommandParser.removeCommand(removeLinkProtocol(message)));
+
+        if (params.id !== undefined) {
+            return this.removeAssetCommand(steamID, message);
+        }
 
         if (params.all === true) {
             // Remove entire pricelist

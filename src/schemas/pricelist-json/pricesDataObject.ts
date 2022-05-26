@@ -12,6 +12,9 @@ export const pricesDataObject: jsonschema.Schema = {
                     sku: {
                         type: 'string'
                     },
+                    code: {
+                        type: 'number'
+                    },
                     enabled: {
                         type: 'boolean'
                     },

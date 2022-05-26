@@ -506,11 +506,7 @@ export default class Bot {
                         this.listingManager = new ListingManager({
                             token: this.options.bptfAccessToken,
                             userID,
-                            userAgent:
-                                'TF2Autobot' +
-                                (this.options.useragentHeaderCustom !== ''
-                                    ? ` - ${this.options.useragentHeaderCustom}`
-                                    : ' - Run your own bot for free'),
+                            userAgent: "Chickens sit on eggs because they don't have chairs (I run TF2Autobot btw)",
                             schema: this.schema
                         });
 

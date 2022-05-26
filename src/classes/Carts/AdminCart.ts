@@ -166,7 +166,7 @@ export default class AdminCart extends Cart {
                             // Add the max amount to the offer substract current added amount
                             this.addTheirItem(
                                 sku,
-                                this.their[sku] ? theirAssetidsCount - this.their[sku] : theirAssetidsCount
+                                this.their[sku] ? theirAssetidsCount - this.their[sku].amount : theirAssetidsCount
                             );
                         }
                     }

@@ -232,6 +232,9 @@ export const optionsSchema: jsonschema.Schema = {
         'processing-accepting': {
             type: 'object',
             properties: {
+                enabled: {
+                    type: 'boolean'
+                },
                 donation: {
                     type: 'string'
                 },
@@ -959,6 +962,9 @@ export const optionsSchema: jsonschema.Schema = {
                             type: 'boolean'
                         },
                         onMaxStock: {
+                            type: 'boolean'
+                        },
+                        buySellCodeCommand: {
                             type: 'boolean'
                         },
                         style: {

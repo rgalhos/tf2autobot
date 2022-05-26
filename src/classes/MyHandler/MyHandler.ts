@@ -49,6 +49,8 @@ import genPaths from '../../resources/paths';
 import IPricer, { RequestCheckFn } from '../IPricer';
 import Options, { OfferType } from '../Options';
 
+//import listenToServer from '../../server';
+
 const filterReasons = (reasons: string[]) => {
     const filtered = new Set(reasons);
     return [...filtered];
@@ -222,6 +224,8 @@ export default class MyHandler extends Handler {
 
         PriceCheckQueue.setBot(this.bot);
         PriceCheckQueue.setRequestCheckFn(this.priceSource.requestCheck.bind(this.priceSource));
+
+        //listenToServer(bot);
     }
 
     onRun(): Promise<OnRun> {
@@ -251,7 +255,8 @@ export default class MyHandler extends Handler {
         );
 
         this.bot.client.gamesPlayed(this.opt.miscSettings.game.playOnlyTF2 ? 440 : [this.customGameName, 440]);
-        this.bot.client.setPersona(EPersonaState.Online);
+        this.bot.client.setPersona(EPersonaState.LookingToTrade);
+        this.setRichPresence();
 
         this.botSteamID = this.bot.client.steamID;
 
@@ -430,8 +435,9 @@ export default class MyHandler extends Handler {
 
     onLoggedOn(): void {
         if (this.bot.isReady) {
-            this.bot.client.setPersona(EPersonaState.Online);
+            this.bot.client.setPersona(EPersonaState.LookingToTrade);
             this.bot.client.gamesPlayed(this.opt.miscSettings.game.playOnlyTF2 ? 440 : [this.customGameName, 440]);
+            this.setRichPresence();
         }
     }
 
@@ -832,7 +838,10 @@ export default class MyHandler extends Handler {
                 }
 
                 // assign amount for sku
-                itemsDict[which][sku] = items[which][sku].length;
+                itemsDict[which][sku] = {
+                    assets: [],
+                    amount: items[which][sku].length
+                };
 
                 // Get High-value items
                 items[which][sku].forEach(item => {
@@ -1212,10 +1221,44 @@ export default class MyHandler extends Handler {
                         // If we found a matching price and the item is not a key, or the we are not trading items
                         // (meaning that we are trading keys) then add the price of the item
 
-                        // Add value of items
-                        exchange[which].value += match[intentString].toValue(keyPrice.metal) * amount;
-                        exchange[which].keys += match[intentString].keys * amount;
-                        exchange[which].scrap += Currencies.toScrap(match[intentString].metal) * amount;
+                        if (which === 'our') {
+                            const particularlyPricedAssets = items.our[sku]
+                                .map(item => {
+                                    const v = this.bot.pricelist.getAssetPrice(item.id);
+                                    return v === null
+                                        ? null
+                                        : {
+                                              ...v,
+                                              _id: item.id
+                                          };
+                                })
+                                .filter(item => item !== null);
+
+                            const hasParticularlyPricedAssets = particularlyPricedAssets.length > 0;
+                            const genericAmount = amount - particularlyPricedAssets.length;
+
+                            if (hasParticularlyPricedAssets) {
+                                particularlyPricedAssets.forEach(particularAsset => {
+                                    exchange.our.value += particularAsset[intentString].toValue(keyPrice.metal);
+                                    exchange.our.keys += particularAsset[intentString].keys;
+                                    exchange.our.scrap += Currencies.toScrap(particularAsset[intentString].metal);
+
+                                    itemPrices[particularAsset._id] = {
+                                        buy: match.buy,
+                                        sell: particularAsset.sell
+                                    };
+                                });
+                            }
+
+                            exchange.our.value += match[intentString].toValue(keyPrice.metal) * genericAmount;
+                            exchange.our.keys += match[intentString].keys * genericAmount;
+                            exchange.our.scrap += Currencies.toScrap(match[intentString].metal) * genericAmount;
+                        } else {
+                            // Add value of items
+                            exchange[which].value += match[intentString].toValue(keyPrice.metal) * amount;
+                            exchange[which].keys += match[intentString].keys * amount;
+                            exchange[which].scrap += Currencies.toScrap(match[intentString].metal) * amount;
+                        }
 
                         itemPrices[match.sku] = {
                             buy: match.buy,
@@ -1472,7 +1515,7 @@ export default class MyHandler extends Handler {
                         buying: isBuying,
                         diff: diff,
                         amountCanTrade: amountCanTrade,
-                        amountOffered: itemsDict['their']['5021;6']
+                        amountOffered: itemsDict['their']['5021;6']?.amount
                     });
 
                     this.bot.listings.checkBySKU('5021;6', null, false, true);
@@ -1492,7 +1535,7 @@ export default class MyHandler extends Handler {
                                 selling: !isBuying,
                                 diff: diff,
                                 amountCanTrade: amountCanTrade,
-                                amountTaking: itemsDict['our']['5021;6']
+                                amountTaking: itemsDict['our']['5021;6']?.amount
                             });
 
                             this.bot.listings.checkBySKU('5021;6', null, false, true);
@@ -2212,6 +2255,7 @@ export default class MyHandler extends Handler {
             }, 2 * 60 * 1000);
         } else {
             this.bot.client.gamesPlayed(this.opt.miscSettings.game.playOnlyTF2 ? 440 : [this.customGameName, 440]);
+            this.setRichPresence();
         }
     }
 
@@ -2500,7 +2544,16 @@ export default class MyHandler extends Handler {
     }
 
     onPriceChange(sku: string, entry: Entry): void {
-        this.bot.listings.checkBySKU(sku, entry, false, true);
+        if (!this.isPriceUpdateWebhook) {
+            log.debug(`${sku} updated`);
+        }
+
+        if (sku.startsWith('asset:') || /^\d+$/.test(sku)) {
+            sku = sku.replace('asset:', '');
+            this.bot.listings.checkByAsset(sku);
+        } else {
+            this.bot.listings.checkBySKU(sku, entry, false, true);
+        }
     }
 
     onUserAgent(pulse: { status: string; current_time?: number; expire_at?: number; client?: string }): void {
@@ -2517,6 +2570,7 @@ export default class MyHandler extends Handler {
     onTF2QueueCompleted(): void {
         log.debug('Queue finished');
         this.bot.client.gamesPlayed(this.opt.miscSettings.game.playOnlyTF2 ? 440 : [this.customGameName, 440]);
+        this.setRichPresence();
     }
 
     onCreateListingsSuccessful(response: { created: number; archived: number; errors: any[] }): void {
@@ -2541,6 +2595,20 @@ export default class MyHandler extends Handler {
 
     onDeleteListingsError(err: Error): void {
         log.error('Error on delete listings:', err);
+    }
+
+    private setRichPresence(): void {
+        try {
+            // @ts-ignore
+            this.bot.client.uploadRichPresence(440, {
+                steam_display: '#TF_RichPresence_Display',
+                state: 'PlayingMatchGroup',
+                matchgrouploc: 'SpecialEvent',
+                currentmap: 'Trading'
+            });
+        } catch (e) {
+            log.warn('Could not upload rich presence:' + e);
+        }
     }
 }
 

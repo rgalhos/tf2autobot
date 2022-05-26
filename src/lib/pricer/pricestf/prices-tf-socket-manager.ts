@@ -36,7 +36,7 @@ export default class PricesTfSocketManager {
 
     init(): void {
         this.shutDown();
-        this.ws = new ReconnectingWebSocket('wss://ws.prices.tf', [], {
+        this.ws = new ReconnectingWebSocket(process.env.CUSTOM_PRICER_WEBSOCKET || 'wss://ws.prices.tf', [], {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             WebSocket: this.socketClass,
             maxEnqueuedMessages: 0,

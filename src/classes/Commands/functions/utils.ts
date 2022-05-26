@@ -10,17 +10,38 @@ import { Entry } from '../../Pricelist';
 import { genericNameAndMatch } from '../../Inventory';
 import { fixItem } from '../../../lib/items';
 import { testSKU } from '../../../lib/tools/export';
+import { normalizeDict } from '../../../server/utils';
 
 export function getItemAndAmount(
     steamID: SteamID,
     message: string,
     bot: Bot,
     from?: 'buy' | 'sell' | 'buycart' | 'sellcart'
-): { match: Entry; amount: number } | null {
+): { match: Entry; assetid: string | null; amount: number } | null {
     let name = removeLinkProtocol(message);
+    let assetid: string | null = null;
     let amount = 1;
-    if (/^[-]?\d+$/.test(name.split(' ')[0])) {
-        // Check if the first part of the name is a number, if so, then that is the amount the user wants to trade
+    let match: string[] | Entry;
+
+    // Check if the only argument is an item code
+    if (/^\d+$/.test(name)) {
+        let entry = bot.pricelist.searchByCode(name);
+
+        if (entry && entry.sku) {
+            name = entry.sku;
+        } else {
+            assetid = name;
+            name = bot.inventoryManager.getInventory.findByAssetid(name);
+
+            if (name === null) {
+                assetid = null;
+            } else {
+                match = bot.pricelist.getAssetPrice(assetid, true);
+            }
+        }
+    }
+    // Check if the first part of the name is a number, if so, then that is the amount the user wants to trade
+    else if (/^[-]?\d+$/.test(name.split(' ')[0])) {
         amount = parseInt(name.split(' ')[0]);
         name = name.replace(amount.toString(), '').trim();
     }
@@ -53,7 +74,7 @@ export function getItemAndAmount(
         return null;
     }
 
-    let match = testSKU(name) ? bot.pricelist.getPrice(name, true) : bot.pricelist.searchByName(name, true);
+    match ??= testSKU(name) ? bot.pricelist.getPrice(name, true) : bot.pricelist.searchByName(name, true);
     if (match !== null && match instanceof Entry && typeof from !== 'undefined') {
         const opt = bot.options.commands;
 
@@ -160,6 +181,7 @@ export function getItemAndAmount(
 
             return {
                 amount: amount,
+                assetid: assetid,
                 match: closestMatch
             };
         } else {
@@ -202,6 +224,7 @@ export function getItemAndAmount(
 
     return {
         amount: amount,
+        assetid: assetid,
         match: match
     };
 }
@@ -700,4 +723,18 @@ export function fixSKU(sku: string): string {
 
 export function removeLinkProtocol(message: string): string {
     return message.replace(/(\w+:|^)\/\//g, '');
+}
+
+export function stringifyHvAttributes(bot: Bot, sku: string, myAsset: string): string {
+    const str: string[] = [];
+    const normalizedDict = normalizeDict(bot, bot.inventoryManager.getInventory.getItems, true);
+    const hv = normalizedDict[sku].items.find(({ assetid }) => assetid === myAsset).highValue;
+
+    if (hv.killstreaker) str.push([hv.killstreaker, hv.sheen].join(' + '));
+    else if (hv.sheen) str.push(hv.sheen);
+
+    if (hv.parts) str.push(hv.parts.map(({ name }) => name).join(' + '));
+    if (hv.spells) str.push(hv.spells.map(({ name }) => name).join(' + '));
+
+    return str.join(' / ');
 }
